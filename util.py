@@ -45,6 +45,7 @@ from math import sqrt
 from keras.callbacks import History 
 import gc
 from math import log
+from keras.metrics import binary_crossentropy
 
 smooth = 1.
 
@@ -59,7 +60,8 @@ def dice_coef_loss(y_true, y_pred):
     return 1.-dice_coef(y_true, y_pred)
 
 
-
+def combined_loss(y_true, y_pred):
+    return binary_crossentropy(y_true,y_pred) + 0.5*(1.-dice_coef(y_true, y_pred))
 
 
 def train_test_split(x,ratio = 0.1,imgSize=(256,256)):
@@ -151,4 +153,96 @@ def invertMask(mask):
     
     newmask = newmask.reshape(maskShape)
     return newmask
+
+
+
+def read_img(filepath, size,grayscale=False):
+    
+    if grayscale:
+        img = image.load_img((filepath), target_size=size,grayscale=True)
+        img = image.img_to_array(img,data_format='channels_last')
+    else:
+        img = image.load_img((filepath), target_size=size)
+        img = image.img_to_array(img,data_format='channels_last')
+    return img
+
+
+class Generator(keras.utils.Sequence):
+    
+    def __init__(self,path,folderList,imgSize = (256,256),invertMask = False):
+        """
+        invertMask : Inverts the mask image
+        path : Path containing the folders for all raster files
+        folderList : List of raster files that will be used by the generator for creating batches
+        """
+        
+        self.path = path
+        self.folderList = folderList
+        self.invertMask = invertMask
+        self.imgSize = imgSize
+        
+        fileList = []
+        
+        for i in range(len(folderList)):
+            files = os.listdir(os.path.join(path,folderList[i]))
+            fileList += [os.path.join(path,folderList[i],x) for x in files]
+            
+        self.imgList = [x for x in fileList if "img" in x]  #Keeping only the RGB map images
+        
+        
+    def __len__(self):
+        
+        return 30
+    
+    def __getitem__(self,index):
+        
+        pairs, targets = self.getBatch(batch_size)
+        
+        return pairs, targets
+        
+
+     
+        
+
+    def getBatch(self,batchSize):
+              
+        imgs=[]
+        masks=[]
+        
+        selections = np.random.choice(len(self.imgList),batchSize,replace=False)
+        
+        for i in range(batchSize):
+            
+            img = read_img(self.imgList[selections[i]],self.imgSize)
+            
+            maskFileName = self.imgList[selections[i]].replace("img","mask")
+            
+            mask = read_img(maskFileName,self.imgSize,grayscale=True)
+            mask = mask/255.0
+            
+            imgs.append(img/255.0)
+            
+            if self.invertMask:
+                mask = invertMask(mask)
+                
+            
+            masks.append(mask.reshape(mask.shape[0],mask.shape[1],1))
+        
+        imgs = np.array(imgs)
+        masks = np.array(masks)
+            
+          
+
+        return( imgs, masks)
+    
+    def on_epoch_end(self):
+        'Updates to be done after each epoch'
+        a = 5
+        
+        
+    def generate(self, batch_size, s="train"):
+        """a generator for batches, so model.fit_generator can be used. """
+        while True:
+            pairs, targets = self.getBatch(batch_size)
+            yield (pairs, targets)
     

@@ -35,6 +35,7 @@ from rasterio.transform import Affine
 from rasterio.transform import IDENTITY, guard_transform
 from rasterio.windows import Window
 from rasterio import warp
+from imageio import imwrite
 
 from tqdm import tqdm
 
@@ -501,7 +502,7 @@ def getIntersectionArea(raster, window, shapeDict, ratio = True):
     
 
 
-def generateWindowsWithMasks(raster, vector, output_dir, window_width=1000, window_height = 1000, step_size = 100):
+def generateWindowsWithMasks_Complete(raster, vector, output_dir, window_width=1000, window_height = 1000, step_size = 100,threshold = 0.05):
     
     name = raster.name.split("/")[-1][:-4]
     shapes = getOverlappingShapes(raster,vector,returnCoord=True)
@@ -538,7 +539,7 @@ def generateWindowsWithMasks(raster, vector, output_dir, window_width=1000, wind
             intersectionArea = getIntersectionArea(raster=raster,shapeDict=shapes,window=w,ratio=True)
         
             
-            if ( intersectionArea>0.05):
+            if ( intersectionArea>threshold):
 
                 count += 1
 #                 print("{} {} Area : {}".format(i,j,intersectionArea))
@@ -547,15 +548,27 @@ def generateWindowsWithMasks(raster, vector, output_dir, window_width=1000, wind
                 imsave("./"+ index+"img.jpg",img)
                 imsave("./"+ index+"mask.jpg",window_mask)
     
+
     
 
 
-def generateMasksForShape(raster,shape,vector,window_width= 1000, window_height = 1000, step_size=100):
+def generateMasksForShape(raster,shape,vector,window_width= 1000, window_height = 1000, step_size=100, threshold=0.05):
     
-    mask = getBinaryMask(raster, shape)
+    
+    #Even though we are focusing on one shape, we want all shapes present in the window to be masked
+    shapes = getOverlappingShapes(raster,vector,returnCoord=True)
+    mask = getBinaryMask(raster, shapes)
+    
     minX,maxX,minY,maxY = getBoundingBox( getShapeCoords(raster,shape) )
     
-    for i in tqdm(range(int(minX), int(maxX), step_size)):
+    minX = int(max(0,minX))
+    minY = int(max(0,minY))
+    maxX = int(min(maxX, raster.width - window_width))
+    maxY = int(min(maxY, raster.height - window_height))
+    
+    count = 0
+    
+    for i in range(int(minX), int(maxX), step_size):
         for j in range(int(minY),int(maxY),step_size):
             
             w = Window(i,j,window_width, window_height)
@@ -575,12 +588,56 @@ def generateMasksForShape(raster,shape,vector,window_width= 1000, window_height 
             intersectionArea = getIntersectionArea(raster=raster,shapeDict=shapes,window=w,ratio=True)
         
             
-            if ( intersectionArea>0.00):
+            if ( intersectionArea>threshold):
+                
+                count +=1
 
-#                 print("{} {} Area : {}".format(i,j,intersectionArea))
-
-                index = str(i)+"_"+str(j)
-                imsave("./"+ index+"img.jpg",img)
-                imsave("./"+ index+"mask.jpg",window_mask)
+                index = str(i)+"_"+str(j)                
+                imwrite("./"+ index+"img.jpg",img)
+                imwrite("./"+ index+"mask.jpg",window_mask)
+        
+    return count
             
     
+            
+
+
+def generateWindowsWithMasks(raster, vector, output_dir, window_width=1000, window_height = 1000, step_size = 100,threshold = 0.05):
+    
+    name = raster.name.split("/")[-1][:-4]
+    shapes = getOverlappingShapes(raster,vector,returnCoord=True)
+    print(name)
+    
+    if len(shapes)==0:
+        print("No overlapping shapes")
+        return
+    
+    if (os.path.exists(os.path.join(output_dir,name))==False) :
+        os.mkdir(os.path.join(output_dir,name))
+            
+    os.chdir(os.path.join(output_dir,name))
+    
+    
+#     mask = getBinaryMask(raster, shapes)
+    
+    
+    for i in range(len(shapes)):
+        
+        if shapes[i]['type'] == 'Polygon':
+            
+            count = generateMasksForShape(raster,shapes[i],vector, window_width = window_width, window_height =window_height, step_size=step_size, threshold = threshold)
+            print("Shape : {} Count : {}".format(i,count))
+        else:
+            ## For MultiPolygon case
+            for j in range(len(shapes[i]['coordinates'])):
+                
+                newShape = {'coordinates':shapes[i]['coordinates'][j] , 'type':'Polygon'}
+                count = generateMasksForShape(raster,newShape,vector, window_width = window_width, window_height =window_height, step_size=step_size, threshold = threshold)
+                print("Shape : {} Sub Polygon : {} Count : {}".format(i,j,count))
+                
+    print("__________________________________________")
+        
+        
+        
+    
+        
